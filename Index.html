@@ -1,3 +1,174 @@
+<!-- STATUS ALERT KONEKSI SHAREPOINT (TOP BANNER) -->
+<div id="sp-status-banner" class="mb-4 p-3 rounded-xl text-xs font-semibold flex items-center justify-between hidden">
+  <div class="flex items-center gap-2">
+    <span id="sp-status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+    <span id="sp-status-text">Memeriksa status koneksi SharePoint Database...</span>
+  </div>
+  <button onclick="checkDatabaseConnection()" class="underline text-[11px]">Cek Ulang</button>
+</div>
+
+<!-- BUTTON FORM ACTIONS -->
+<div class="flex items-center justify-end space-x-3 pt-4 border-t border-slate-200">
+  <button id="btn-save-draft" onclick="handleFormSubmit('draft')" class="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg font-semibold hover:bg-slate-100 text-xs flex items-center gap-1.5">
+    <i data-lucide="save" class="w-4 h-4"></i> Save Draft
+  </button>
+  <button id="btn-submit" onclick="handleFormSubmit('submit')" class="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-semibold text-xs flex items-center gap-2 shadow-sm">
+    <span id="btn-submit-spinner" class="hidden animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-white"></span>
+    <i id="btn-submit-icon" data-lucide="send" class="w-4 h-4"></i>
+    <span id="btn-submit-text">Submit Inspection</span>
+  </button>
+</div>
+
+<!-- TOAST NOTIFICATION CONTAINER -->
+<div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2"></div>
+
+<script>
+  let isSubmitting = false;
+
+  document.addEventListener("DOMContentLoaded", function() {
+    checkDatabaseConnection();
+  });
+
+  // Cek Status Koneksi SharePoint Database
+  function checkDatabaseConnection() {
+    const banner = document.getElementById('sp-status-banner');
+    const dot = document.getElementById('sp-status-dot');
+    const text = document.getElementById('sp-status-text');
+    
+    banner.classList.remove('hidden');
+    banner.className = "mb-4 p-3 rounded-xl text-xs font-semibold flex items-center justify-between bg-slate-100 text-slate-700 border border-slate-200";
+    text.innerText = "Memeriksa status koneksi SharePoint Cloud Database...";
+
+    google.script.run.withSuccessHandler(function(res) {
+      if (res.connected) {
+        banner.className = "mb-4 p-3 rounded-xl text-xs font-semibold flex items-center justify-between bg-emerald-50 text-emerald-800 border border-emerald-200";
+        dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+        text.innerText = "Koneksi Database SharePoint Aktif & Terhubung (Real-Time Mode)";
+      } else {
+        banner.className = "mb-4 p-3 rounded-xl text-xs font-semibold flex items-center justify-between bg-rose-50 text-rose-800 border border-rose-200";
+        dot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+        text.innerText = "PERHATIAN: " + res.error;
+      }
+    }).fetchDashboardDataFromSharePoint();
+  }
+
+  // Eksekusi Submit / Save Draft
+  function handleFormSubmit(mode) {
+    if (isSubmitting) return; // Mencegah duplicate click
+
+    const payload = collectFormData();
+
+    // Validasi Sebelum Submit (Strict mode)
+    if (mode === 'submit') {
+      const validation = validateInspectionForm(payload);
+      if (!validation.isValid) {
+        showToast("Validation Error", validation.message, "error");
+        return;
+      }
+    }
+
+    // Aktifkan Loading Indicator & Disable Tombol
+    setLoadingState(true);
+
+    // Kirim Data ke Backend SharePoint via Graph API
+    google.script.run.withSuccessHandler(function(res) {
+      setLoadingState(false);
+      if (res.success) {
+        showToast("Berhasil Disimpan!", res.message, "success");
+        resetInspectionForm();
+      } else {
+        showToast("Gagal Menyimpan!", res.message, "error");
+      }
+    }).withFailureHandler(function(err) {
+      setLoadingState(false);
+      showToast("System Error", "Terjadi kesalahan jaringan: " + err.message, "error");
+    }).submitInspectionToSharePoint(payload);
+  }
+
+  // Strict Validation Logic
+  function validateInspectionForm(data) {
+    if (!data.header.inspectorName) return { isValid: false, message: "Nama Teknisi / Operator wajib diisi!" };
+    if (!data.header.inspectionDate) return { isValid: false, message: "Tanggal Inspeksi wajib diisi!" };
+    if (!data.details || data.details.length === 0) return { isValid: false, message: "Minimal 1 equipment harus diisi!" };
+
+    for (let detail of data.details) {
+      if (!detail.inspectionNote) {
+        return { isValid: false, message: `Catatan Inspeksi pada ${detail.equipmentCode} wajib diisi!` };
+      }
+      if (detail.hecData && !detail.hecData.batchNumber) {
+        return { isValid: false, message: `Batch Number pada HEC System (${detail.equipmentCode}) wajib diisi!` };
+      }
+    }
+    return { isValid: true };
+  }
+
+  // Toggle Loading Indicator UI
+  function setLoadingState(loading) {
+    isSubmitting = loading;
+    const btnSubmit = document.getElementById('btn-submit');
+    const btnDraft = document.getElementById('btn-save-draft');
+    const spinner = document.getElementById('btn-submit-spinner');
+    const icon = document.getElementById('btn-submit-icon');
+    const text = document.getElementById('btn-submit-text');
+
+    if (loading) {
+      btnSubmit.disabled = true;
+      btnDraft.disabled = true;
+      spinner.classList.remove('hidden');
+      icon.classList.add('hidden');
+      text.innerText = "Menyimpan ke SharePoint...";
+      btnSubmit.classList.add('opacity-75', 'cursor-not-allowed');
+    } else {
+      btnSubmit.disabled = false;
+      btnDraft.disabled = false;
+      spinner.classList.add('hidden');
+      icon.classList.remove('hidden');
+      text.innerText = "Submit Inspection";
+      btnSubmit.classList.remove('opacity-75', 'cursor-not-allowed');
+    }
+  }
+
+  // Toast Notification UI Handler
+  function showToast(title, message, type) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    const bgColor = type === 'success' ? 'bg-emerald-600' : 'bg-rose-600';
+    
+    toast.className = `${bgColor} text-white p-4 rounded-xl shadow-xl flex items-start space-x-3 max-w-md transition-all transform duration-300 ease-in-out`;
+    toast.innerHTML = `
+      <div class="flex-1">
+        <h4 class="font-bold text-xs">${title}</h4>
+        <p class="text-[11px] opacity-90 mt-0.5">${message}</p>
+      </div>
+      <button onclick="this.parentElement.remove()" class="text-white opacity-70 hover:opacity-100">✕</button>
+    `;
+
+    container.appendChild(toast);
+    setTimeout(() => { toast.remove(); }, 5000);
+  }
+
+  // Helper Pengumpulan Data Form
+  function collectFormData() {
+    return {
+      header: {
+        inspectionDate: document.getElementById('formTanggal') ? document.getElementById('formTanggal').value : new Date().toISOString().slice(0,10),
+        inspectorName: document.getElementById('formTeknisi') ? document.getElementById('formTeknisi').value : 'Taufiq N.',
+        shift: 'Shift 1',
+        groupForm: 'Group A (Plant 1 & 2)'
+      },
+      details: [
+        {
+          equipmentCode: 'EQ-MZ-01',
+          runningOil: 'GL 9820',
+          drum1Level: 42.5,
+          drum2Level: 38.0,
+          inspectionNote: 'Normal operasi, level drum dalam ambang batas aman',
+          hasTrouble: false
+        }
+      ]
+    };
+  }
+</script>
 // Fetch Master Data & Submit Form ke Apps Script Backend
 const API = {
   async getDashboard() {
