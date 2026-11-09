@@ -1,0 +1,43 @@
+// Fetch Master Data & Submit Form ke Apps Script Backend
+const API = {
+  async getDashboard() {
+    try {
+      const res = await fetch(`${CONFIG.API_URL}?action=getDashboard`);
+      return await res.json();
+    } catch (err) {
+      console.error("Gagal mengambil data dashboard:", err);
+      return null;
+    }
+  },
+
+  async submitInspection(payload) {
+    try {
+      const res = await fetch(CONFIG.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submitInspection', payload: payload })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error("Gagal mengirim data inspeksi:", err);
+      return { success: false, message: err.message };
+    }
+  }
+};
+
+function exportLongPhoto(elementId, filename) {
+  const element = document.getElementById(elementId);
+  
+  html2canvas(element, { scale: 2, useCORS: true }).then(canvas => {
+    const link = document.createElement('a');
+    link.download = filename || `Summary_Lubrication_MGC_${new Date().toISOString().slice(0,10)}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }).catch(err => {
+    alert('Gagal mengekspor Long Photo: ' + err.message);
+  });
+}
+
+function exportPDF() {
+  window.print(); // Native Print & Save as PDF Landscape
+}
